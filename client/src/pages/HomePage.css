@@ -4,7 +4,7 @@
 
 /* Hero Section */
 .hero-section {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
   color: white;
   padding: 6rem 2rem;
   text-align: center;
@@ -45,7 +45,7 @@
 
 .btn-primary {
   background-color: #fff;
-  color: #667eea;
+  color: #6b7280;
 }
 
 .btn-primary:hover {
@@ -61,7 +61,7 @@
 
 .btn-secondary:hover {
   background-color: white;
-  color: #667eea;
+  color: #6b7280;
   transform: translateY(-2px);
 }
 
@@ -149,7 +149,7 @@
 
 .stat-item h3 {
   font-size: 3rem;
-  color: #667eea;
+  color: #6b7280;
   margin-bottom: 0.5rem;
 }
 

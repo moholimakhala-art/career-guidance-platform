@@ -188,29 +188,8 @@ const InstitutionDashboard = () => {
   const renderDashboard = () => (
     <div className="dashboard-overview">
       <h2>Institution Overview</h2>
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-icon"></div>
-          <h3>Total Applications</h3>
-          <p className="stat-number">{stats.totalApplications}</p>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon"></div>
-          <h3>Pending Applications</h3>
-          <p className="stat-number">{stats.pendingApplications}</p>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon"></div>
-          <h3>Admitted Students</h3>
-          <p className="stat-number">{stats.admittedStudents}</p>
-        </div>
-        <div className="stat-card">
-          <div className="stat-icon"></div>
-          <h3>Total Courses</h3>
-          <p className="stat-number">{stats.totalCourses}</p>
-        </div>
-      </div>
       
+      {/* Quick Actions Section Only */}
       <div className="quick-actions">
         <h3>Quick Actions</h3>
         <div className="action-buttons">

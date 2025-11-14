@@ -5,7 +5,7 @@
 }
 
 .dashboard-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
   color: white;
   padding: 2rem;
   border-radius: 10px;
@@ -55,12 +55,12 @@
 }
 
 .nav-btn:hover {
-  background-color: #f0f0f0;
-  color: #333;
+  background-color: #f1f5f9;
+  color: #374151;
 }
 
 .nav-btn.active {
-  background-color: #667eea;
+  background-color: #6b7280;
   color: white;
 }
 

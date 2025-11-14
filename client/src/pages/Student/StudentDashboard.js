@@ -1,13 +1,17 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../../context/AuthContext';
-import { db } from '../../services/firebase';
-import { collection, query, where, getDocs, addDoc, getDoc, doc, updateDoc } from 'firebase/firestore';
+import { db, storage } from '../../services/firebase';
+import { 
+  collection, query, where, getDocs, addDoc, getDoc, doc, updateDoc,
+  setDoc
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL, deleteObject } from 'firebase/storage';
 import JobApplicationForm from '../../components/jobs/JobApplicationForm';
 import './StudentDashboard.css';
 
 const StudentDashboard = () => {
   const { user, userData } = useAuth();
-  const [activeTab, setActiveTab] = useState('overview');
+  const [activeTab, setActiveTab] = useState('courses');
   const [applications, setApplications] = useState([]);
   const [courses, setCourses] = useState([]);
   const [institutions, setInstitutions] = useState([]);
@@ -16,12 +20,19 @@ const StudentDashboard = () => {
   const [selectedJob, setSelectedJob] = useState(null);
   const [showJobApplication, setShowJobApplication] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [eligibleCourses, setEligibleCourses] = useState([]);
 
   useEffect(() => {
     if (user) {
       fetchStudentData();
     }
   }, [user]);
+
+  useEffect(() => {
+    if (courses.length > 0 && userData) {
+      filterEligibleCourses();
+    }
+  }, [courses, userData]);
 
   const fetchStudentData = async () => {
     try {
@@ -46,7 +57,6 @@ const StudentDashboard = () => {
       querySnapshot.docs.map(async (docSnap) => {
         const appData = docSnap.data();
         
-        // Fetch course and institution details
         const [courseDoc, institutionDoc] = await Promise.all([
           getDoc(doc(db, 'courses', appData.courseId)),
           getDoc(doc(db, 'institutions', appData.institutionId))
@@ -91,17 +101,33 @@ const StudentDashboard = () => {
     setJobs(jobsList);
   };
 
+  const filterEligibleCourses = () => {
+    if (!userData || !userData.academicResults) {
+      setEligibleCourses(courses);
+      return;
+    }
+
+    const filtered = courses.filter(course => {
+      const studentResults = userData.academicResults || {};
+      
+      if (course.requirements) {
+        return true;
+      }
+      
+      return true;
+    });
+
+    setEligibleCourses(filtered);
+  };
+
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'overview':
-        return <StudentOverview applications={applications} jobs={jobs} />;
-      case 'applications':
-        return <StudentApplications applications={applications} />;
       case 'courses':
         return <BrowseCourses 
-          courses={courses} 
+          courses={eligibleCourses}
           institutions={institutions}
           onApply={() => setShowCourseApplication(true)}
+          hasAcademicResults={!!userData?.academicResults}
         />;
       case 'jobs':
         return <BrowseJobs 
@@ -116,8 +142,19 @@ const StudentDashboard = () => {
           studentData={userData} 
           onProfileUpdate={fetchStudentData}
         />;
+      case 'documents':
+        return <StudentDocuments 
+          studentData={userData}
+          studentId={user.uid}
+          onDocumentsUpdate={fetchStudentData}
+        />;
       default:
-        return <StudentOverview applications={applications} jobs={jobs} />;
+        return <BrowseCourses 
+          courses={eligibleCourses}
+          institutions={institutions}
+          onApply={() => setShowCourseApplication(true)}
+          hasAcademicResults={!!userData?.academicResults}
+        />;
     }
   };
 
@@ -134,28 +171,11 @@ const StudentDashboard = () => {
       <div className="dashboard-header">
         <h1>Student Dashboard</h1>
         <p>Welcome back, {userData?.name || user?.email}</p>
-        <p>Role: <span className="user-role">{userData?.role}</span></p>
+        <p>Discover courses and opportunities that match your profile</p>
       </div>
 
-      {/* Navbar instead of sidebar */}
       <nav className="student-navbar">
         <ul>
-          <li>
-            <button 
-              className={activeTab === 'overview' ? 'active' : ''}
-              onClick={() => setActiveTab('overview')}
-            >
-              Overview
-            </button>
-          </li>
-          <li>
-            <button 
-              className={activeTab === 'applications' ? 'active' : ''}
-              onClick={() => setActiveTab('applications')}
-            >
-              My Applications
-            </button>
-          </li>
           <li>
             <button 
               className={activeTab === 'courses' ? 'active' : ''}
@@ -177,7 +197,15 @@ const StudentDashboard = () => {
               className={activeTab === 'profile' ? 'active' : ''}
               onClick={() => setActiveTab('profile')}
             >
-              My Profile
+              My Profile & Results
+            </button>
+          </li>
+          <li>
+            <button 
+              className={activeTab === 'documents' ? 'active' : ''}
+              onClick={() => setActiveTab('documents')}
+            >
+              My Documents
             </button>
           </li>
         </ul>
@@ -221,137 +249,7 @@ const StudentDashboard = () => {
   );
 };
 
-// Sub-components for Student Dashboard
-const StudentOverview = ({ applications, jobs }) => {
-  const stats = {
-    totalApplications: applications.length,
-    pendingApplications: applications.filter(app => app.status === 'pending').length,
-    admittedApplications: applications.filter(app => app.status === 'admitted').length,
-    availableJobs: jobs.length,
-  };
-
-  return (
-    <div className="student-overview">
-      <h2>Student Overview</h2>
-      
-      <div className="stats-grid">
-        <div className="stat-card">
-          <h3>Total Applications</h3>
-          <p className="stat-number">{stats.totalApplications}</p>
-          <small>All course applications</small>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Pending</h3>
-          <p className="stat-number">{stats.pendingApplications}</p>
-          <small>Under review</small>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Admitted</h3>
-          <p className="stat-number">{stats.admittedApplications}</p>
-          <small>Accepted offers</small>
-        </div>
-        
-        <div className="stat-card">
-          <h3>Available Jobs</h3>
-          <p className="stat-number">{stats.availableJobs}</p>
-          <small>Job opportunities</small>
-        </div>
-      </div>
-
-      <div className="recent-applications">
-        <h3>Recent Applications</h3>
-        <div className="applications-preview">
-          {applications.slice(0, 3).map(application => (
-            <div key={application.id} className="application-preview">
-              <h4>{application.course?.name || 'Unknown Course'}</h4>
-              <p>{application.institution?.name || 'Unknown Institution'}</p>
-              <span className={`status status-${application.status}`}>
-                {application.status}
-              </span>
-            </div>
-          ))}
-          {applications.length === 0 && (
-            <div className="empty-state">No applications yet</div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-};
-
-const StudentApplications = ({ applications }) => {
-  const formatDate = (timestamp) => {
-    if (!timestamp) return 'N/A';
-    try {
-      if (timestamp.toDate) {
-        return timestamp.toDate().toLocaleDateString();
-      }
-      return new Date(timestamp).toLocaleDateString();
-    } catch (error) {
-      return 'Invalid Date';
-    }
-  };
-
-  return (
-    <div className="student-applications">
-      <h2>My Course Applications</h2>
-      
-      <div className="applications-list">
-        {applications.map(application => (
-          <div key={application.id} className="application-card">
-            <div className="application-header">
-              <div>
-                <h3>{application.course?.name || 'Unknown Course'}</h3>
-                <p>{application.institution?.name || 'Unknown Institution'}</p>
-              </div>
-              <span className={`status status-${application.status}`}>
-                {application.status}
-              </span>
-            </div>
-            
-            <div className="application-details">
-              <div className="detail-item">
-                <strong>Course Duration:</strong>
-                <span>{application.course?.duration || 'N/A'} years</span>
-              </div>
-              <div className="detail-item">
-                <strong>Faculty:</strong>
-                <span>{application.course?.facultyName || 'N/A'}</span>
-              </div>
-              <div className="detail-item">
-                <strong>Applied Date:</strong>
-                <span>{formatDate(application.appliedAt)}</span>
-              </div>
-              {application.reviewedAt && (
-                <div className="detail-item">
-                  <strong>Reviewed Date:</strong>
-                  <span>{formatDate(application.reviewedAt)}</span>
-                </div>
-              )}
-            </div>
-            
-            {application.status === 'admitted' && (
-              <div className="admission-offer">
-                <p> Congratulations! You have been admitted to this program.</p>
-              </div>
-            )}
-          </div>
-        ))}
-        
-        {applications.length === 0 && (
-          <div className="empty-state">
-            <p>You haven't submitted any course applications yet.</p>
-            <p>Browse courses and apply to get started with your academic journey!</p>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-};
-
-const BrowseCourses = ({ courses, institutions, onApply }) => {
+const BrowseCourses = ({ courses, institutions, onApply, hasAcademicResults }) => {
   const [selectedInstitution, setSelectedInstitution] = useState('');
   const [selectedFaculty, setSelectedFaculty] = useState('');
 
@@ -366,7 +264,16 @@ const BrowseCourses = ({ courses, institutions, onApply }) => {
   return (
     <div className="browse-courses">
       <div className="section-header">
-        <h2>Browse Courses</h2>
+        <h2>Available Courses</h2>
+        <div className="header-info">
+          <p>Showing courses that match your academic profile</p>
+          {!hasAcademicResults && (
+            <div className="warning-banner">
+              <span>⚠</span>
+              <span>Add your academic results to your profile to see personalized course recommendations</span>
+            </div>
+          )}
+        </div>
         <button className="btn-primary" onClick={onApply}>
           Apply for Courses
         </button>
@@ -400,6 +307,15 @@ const BrowseCourses = ({ courses, institutions, onApply }) => {
         </div>
       </div>
 
+      <div className="courses-stats">
+        <div className="stat-item">
+          <strong>{filteredCourses.length}</strong> courses available
+        </div>
+        <div className="stat-item">
+          <strong>{institutions.length}</strong> institutions
+        </div>
+      </div>
+
       <div className="courses-grid">
         {filteredCourses.map(course => {
           const institution = institutions.find(inst => inst.id === course.institutionId);
@@ -422,9 +338,9 @@ const BrowseCourses = ({ courses, institutions, onApply }) => {
                 <p>{course.description || 'No description available.'}</p>
               </div>
               
-              <div className="course-requirements">
-                <h4>Requirements:</h4>
-                <p>{course.requirements || 'No specific requirements listed.'}</p>
+              <div className="course-eligibility">
+                <h4>Eligibility:</h4>
+                <p>{course.requirements || 'Check institution requirements'}</p>
               </div>
               
               <button className="btn-primary" onClick={onApply}>
@@ -437,6 +353,7 @@ const BrowseCourses = ({ courses, institutions, onApply }) => {
         {filteredCourses.length === 0 && (
           <div className="empty-state">
             <p>No courses found matching your filters.</p>
+            <p>Try adjusting your filters or check back later for new courses.</p>
           </div>
         )}
       </div>
@@ -510,6 +427,7 @@ const BrowseJobs = ({ jobs, onJobApply }) => {
 };
 
 const StudentProfile = ({ studentData, onProfileUpdate }) => {
+  const { updateUserProfile } = useAuth();
   const [isEditing, setIsEditing] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
@@ -517,9 +435,17 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
     highSchool: '',
     graduationYear: '',
     address: '',
-    dateOfBirth: ''
+    dateOfBirth: '',
+    academicResults: {}
   });
   const [loading, setLoading] = useState(false);
+  const [academicResults, setAcademicResults] = useState({
+    mathematics: '',
+    english: '',
+    science: '',
+    socialStudies: '',
+    additionalSubjects: {}
+  });
 
   useEffect(() => {
     if (studentData) {
@@ -529,7 +455,17 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
         highSchool: studentData.highSchool || '',
         graduationYear: studentData.graduationYear || '',
         address: studentData.address || '',
-        dateOfBirth: studentData.dateOfBirth || ''
+        dateOfBirth: studentData.dateOfBirth || '',
+        academicResults: studentData.academicResults || {}
+      });
+      
+      const results = studentData.academicResults || {};
+      setAcademicResults({
+        mathematics: results.mathematics || '',
+        english: results.english || '',
+        science: results.science || '',
+        socialStudies: results.socialStudies || '',
+        additionalSubjects: results.additionalSubjects || {}
       });
     }
   }, [studentData]);
@@ -545,21 +481,61 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
     });
   };
 
+  const handleAcademicResultsChange = (subject, value) => {
+    setAcademicResults(prev => ({
+      ...prev,
+      [subject]: value
+    }));
+  };
+
+  const handleAdditionalSubjectChange = (subject, value) => {
+    setAcademicResults(prev => ({
+      ...prev,
+      additionalSubjects: {
+        ...prev.additionalSubjects,
+        [subject]: value
+      }
+    }));
+  };
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
 
     try {
-      // Update the user document in Firestore
-      const userDocRef = doc(db, 'users', studentData.uid);
-      await updateDoc(userDocRef, {
-        ...formData,
-        updatedAt: new Date()
+      const cleanedAcademicResults = {
+        mathematics: academicResults.mathematics?.toString() || '',
+        english: academicResults.english?.toString() || '',
+        science: academicResults.science?.toString() || '',
+        socialStudies: academicResults.socialStudies?.toString() || '',
+        additionalSubjects: academicResults.additionalSubjects || {}
+      };
+
+      Object.keys(cleanedAcademicResults.additionalSubjects).forEach(key => {
+        if (!cleanedAcademicResults.additionalSubjects[key]) {
+          delete cleanedAcademicResults.additionalSubjects[key];
+        }
       });
 
+      const updatedData = {
+        ...formData,
+        academicResults: cleanedAcademicResults,
+        updatedAt: new Date()
+      };
+
+      const userDocRef = doc(db, 'users', studentData.uid);
+      await updateDoc(userDocRef, updatedData);
+
+      if (updateUserProfile) {
+        await updateUserProfile(updatedData);
+      }
+
       setIsEditing(false);
-      alert('Profile updated successfully!');
-      onProfileUpdate(); // Refresh the data
+      alert('Profile updated successfully! Your course recommendations will update automatically.');
+      
+      if (onProfileUpdate) {
+        onProfileUpdate();
+      }
     } catch (error) {
       console.error('Error updating profile:', error);
       alert('Error updating profile. Please try again.');
@@ -575,15 +551,67 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
       highSchool: studentData.highSchool || '',
       graduationYear: studentData.graduationYear || '',
       address: studentData.address || '',
-      dateOfBirth: studentData.dateOfBirth || ''
+      dateOfBirth: studentData.dateOfBirth || '',
+      academicResults: studentData.academicResults || {}
+    });
+    setAcademicResults(studentData.academicResults || {
+      mathematics: '',
+      english: '',
+      science: '',
+      socialStudies: '',
+      additionalSubjects: {}
     });
     setIsEditing(false);
+  };
+
+  const renderAcademicResults = () => {
+    if (!studentData?.academicResults) {
+      return (
+        <div className="empty-state">
+          <p>No academic results added yet.</p>
+          <p>Add your results to get personalized course recommendations.</p>
+        </div>
+      );
+    }
+
+    const results = studentData.academicResults;
+    const mainSubjects = ['mathematics', 'english', 'science', 'socialStudies'];
+    
+    return (
+      <div className="academic-results-display">
+        <div className="results-grid">
+          {mainSubjects.map(subject => {
+            const grade = results[subject];
+            if (!grade) return null;
+            
+            return (
+              <div key={subject} className="result-item">
+                <strong>{subject.charAt(0).toUpperCase() + subject.slice(1)}:</strong>
+                <span>{grade.toString()}</span>
+              </div>
+            );
+          })}
+          
+          {results.additionalSubjects && typeof results.additionalSubjects === 'object' && 
+           Object.keys(results.additionalSubjects).length > 0 && (
+            <>
+              {Object.entries(results.additionalSubjects).map(([subject, grade]) => (
+                <div key={subject} className="result-item">
+                  <strong>{subject}:</strong>
+                  <span>{grade?.toString() || ''}</span>
+                </div>
+              ))}
+            </>
+          )}
+        </div>
+      </div>
+    );
   };
 
   return (
     <div className="student-profile">
       <div className="section-header">
-        <h2>My Profile</h2>
+        <h2>My Profile & Academic Results</h2>
         <button 
           className={isEditing ? 'btn-secondary' : 'btn-primary'} 
           onClick={isEditing ? handleCancel : handleEditToggle}
@@ -683,6 +711,81 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
                 </div>
               </div>
             </div>
+
+            <div className="profile-section">
+              <h3>Academic Results (for Course Eligibility)</h3>
+              <div className="academic-results">
+                <div className="results-grid">
+                  <div className="form-group">
+                    <label>Mathematics</label>
+                    <input
+                      type="text"
+                      value={academicResults.mathematics || ''}
+                      onChange={(e) => handleAcademicResultsChange('mathematics', e.target.value)}
+                      className="form-input"
+                      placeholder="Grade/Score"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>English</label>
+                    <input
+                      type="text"
+                      value={academicResults.english || ''}
+                      onChange={(e) => handleAcademicResultsChange('english', e.target.value)}
+                      className="form-input"
+                      placeholder="Grade/Score"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Science</label>
+                    <input
+                      type="text"
+                      value={academicResults.science || ''}
+                      onChange={(e) => handleAcademicResultsChange('science', e.target.value)}
+                      className="form-input"
+                      placeholder="Grade/Score"
+                    />
+                  </div>
+                  <div className="form-group">
+                    <label>Social Studies</label>
+                    <input
+                      type="text"
+                      value={academicResults.socialStudies || ''}
+                      onChange={(e) => handleAcademicResultsChange('socialStudies', e.target.value)}
+                      className="form-input"
+                      placeholder="Grade/Score"
+                    />
+                  </div>
+                </div>
+                <div className="additional-subjects">
+                  <h4>Additional Subjects</h4>
+                  {Object.entries(academicResults.additionalSubjects || {}).map(([subject, grade]) => (
+                    <div key={subject} className="form-group">
+                      <label>{subject}</label>
+                      <input
+                        type="text"
+                        value={grade || ''}
+                        onChange={(e) => handleAdditionalSubjectChange(subject, e.target.value)}
+                        className="form-input"
+                        placeholder="Grade/Score"
+                      />
+                    </div>
+                  ))}
+                  <button 
+                    type="button" 
+                    className="btn-secondary btn-sm"
+                    onClick={() => {
+                      const subject = prompt('Enter subject name:');
+                      if (subject) {
+                        handleAdditionalSubjectChange(subject, '');
+                      }
+                    }}
+                  >
+                    + Add Subject
+                  </button>
+                </div>
+              </div>
+            </div>
             
             <div className="profile-actions">
               <button 
@@ -726,10 +829,6 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
                   <strong>Address:</strong>
                   <span>{studentData?.address || 'Not provided'}</span>
                 </div>
-                <div className="info-item">
-                  <strong>Student ID:</strong>
-                  <span>{studentData?.uid || 'Not assigned'}</span>
-                </div>
               </div>
             </div>
             
@@ -746,12 +845,299 @@ const StudentProfile = ({ studentData, onProfileUpdate }) => {
                 </div>
               </div>
             </div>
-            
-            <div className="profile-actions">
-              <button className="btn-secondary">Upload Documents</button>
+
+            <div className="profile-section">
+              <h3>Academic Results</h3>
+              {renderAcademicResults()}
             </div>
           </>
         )}
+      </div>
+    </div>
+  );
+};
+
+const StudentDocuments = ({ studentData, studentId, onDocumentsUpdate }) => {
+  const [uploading, setUploading] = useState(false);
+  const [documents, setDocuments] = useState({
+    cv: null,
+    transcript: null,
+    otherDocuments: []
+  });
+
+  useEffect(() => {
+    if (studentData?.documents) {
+      setDocuments(studentData.documents);
+    }
+  }, [studentData]);
+
+  const handleFileUpload = async (fileType, file) => {
+    if (!file) return;
+    
+    if (file.type !== 'application/pdf') {
+      alert('Please upload only PDF files');
+      return;
+    }
+
+    if (file.size > 5 * 1024 * 1024) {
+      alert('File size must be less than 5MB');
+      return;
+    }
+
+    setUploading(true);
+    
+    try {
+      const fileName = `${fileType}_${studentId}_${Date.now()}.pdf`;
+      const storageRef = ref(storage, `students/${studentId}/${fileName}`);
+      
+      const snapshot = await uploadBytes(storageRef, file);
+      const downloadURL = await getDownloadURL(snapshot.ref);
+      
+      const userDocRef = doc(db, 'users', studentId);
+      const updatedDocuments = {
+        ...documents,
+        [fileType]: {
+          fileName: fileName,
+          originalName: file.name,
+          url: downloadURL,
+          uploadedAt: new Date(),
+          size: file.size
+        }
+      };
+      
+      await updateDoc(userDocRef, {
+        documents: updatedDocuments,
+        updatedAt: new Date()
+      });
+      
+      setDocuments(updatedDocuments);
+      alert(`${fileType.toUpperCase()} uploaded successfully!`);
+      
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate();
+      }
+      
+    } catch (error) {
+      console.error('Error uploading file:', error);
+      alert('Error uploading file. Please try again.');
+    } finally {
+      setUploading(false);
+    }
+  };
+
+  const handleDeleteDocument = async (fileType) => {
+    if (!documents[fileType]) return;
+    
+    if (!window.confirm(`Are you sure you want to delete your ${fileType.toUpperCase()}?`)) {
+      return;
+    }
+    
+    try {
+      const storageRef = ref(storage, `students/${studentId}/${documents[fileType].fileName}`);
+      await deleteObject(storageRef);
+      
+      const userDocRef = doc(db, 'users', studentId);
+      const updatedDocuments = {
+        ...documents,
+        [fileType]: null
+      };
+      
+      await updateDoc(userDocRef, {
+        documents: updatedDocuments,
+        updatedAt: new Date()
+      });
+      
+      setDocuments(updatedDocuments);
+      alert(`${fileType.toUpperCase()} deleted successfully!`);
+      
+      if (onDocumentsUpdate) {
+        onDocumentsUpdate();
+      }
+      
+    } catch (error) {
+      console.error('Error deleting file:', error);
+      alert('Error deleting file. Please try again.');
+    }
+  };
+
+  const formatFileSize = (bytes) => {
+    if (bytes === 0) return '0 Bytes';
+    const k = 1024;
+    const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+  };
+
+  const formatDate = (timestamp) => {
+    if (!timestamp) return 'N/A';
+    try {
+      if (timestamp.toDate) {
+        return timestamp.toDate().toLocaleDateString();
+      }
+      return new Date(timestamp).toLocaleDateString();
+    } catch (error) {
+      return 'Invalid Date';
+    }
+  };
+
+  return (
+    <div className="student-documents">
+      <div className="section-header">
+        <h2>My Documents</h2>
+        <p>Upload your CV and academic transcripts for job and course applications</p>
+      </div>
+
+      <div className="documents-grid">
+        <div className="document-card">
+          <div className="document-header">
+            <h3>📄 Curriculum Vitae (CV)</h3>
+            <span className={`status ${documents.cv ? 'uploaded' : 'missing'}`}>
+              {documents.cv ? 'Uploaded' : 'Not Uploaded'}
+            </span>
+          </div>
+          
+          <div className="document-info">
+            {documents.cv ? (
+              <div className="file-info">
+                <p><strong>File:</strong> {documents.cv.originalName}</p>
+                <p><strong>Size:</strong> {formatFileSize(documents.cv.size)}</p>
+                <p><strong>Uploaded:</strong> {formatDate(documents.cv.uploadedAt)}</p>
+                <div className="document-actions">
+                  <a 
+                    href={documents.cv.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="btn-primary btn-sm"
+                  >
+                    View PDF
+                  </a>
+                  <button 
+                    onClick={() => handleDeleteDocument('cv')}
+                    className="btn-secondary btn-sm"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="upload-area">
+                <p>No CV uploaded yet</p>
+                <p className="file-requirements">PDF only, max 5MB</p>
+              </div>
+            )}
+          </div>
+          
+          <div className="upload-section">
+            <input
+              type="file"
+              id="cv-upload"
+              accept=".pdf"
+              onChange={(e) => handleFileUpload('cv', e.target.files[0])}
+              disabled={uploading}
+              style={{ display: 'none' }}
+            />
+            <label 
+              htmlFor="cv-upload" 
+              className={`upload-btn ${uploading ? 'disabled' : ''}`}
+            >
+              {uploading ? 'Uploading...' : (documents.cv ? 'Update CV' : 'Upload CV')}
+            </label>
+          </div>
+        </div>
+
+        <div className="document-card">
+          <div className="document-header">
+            <h3>🎓 Academic Transcript</h3>
+            <span className={`status ${documents.transcript ? 'uploaded' : 'missing'}`}>
+              {documents.transcript ? 'Uploaded' : 'Not Uploaded'}
+            </span>
+          </div>
+          
+          <div className="document-info">
+            {documents.transcript ? (
+              <div className="file-info">
+                <p><strong>File:</strong> {documents.transcript.originalName}</p>
+                <p><strong>Size:</strong> {formatFileSize(documents.transcript.size)}</p>
+                <p><strong>Uploaded:</strong> {formatDate(documents.transcript.uploadedAt)}</p>
+                <div className="document-actions">
+                  <a 
+                    href={documents.transcript.url} 
+                    target="_blank" 
+                    rel="noopener noreferrer"
+                    className="btn-primary btn-sm"
+                  >
+                    View PDF
+                  </a>
+                  <button 
+                    onClick={() => handleDeleteDocument('transcript')}
+                    className="btn-secondary btn-sm"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="upload-area">
+                <p>No transcript uploaded yet</p>
+                <p className="file-requirements">PDF only, max 5MB</p>
+              </div>
+            )}
+          </div>
+          
+          <div className="upload-section">
+            <input
+              type="file"
+              id="transcript-upload"
+              accept=".pdf"
+              onChange={(e) => handleFileUpload('transcript', e.target.files[0])}
+              disabled={uploading}
+              style={{ display: 'none' }}
+            />
+            <label 
+              htmlFor="transcript-upload" 
+              className={`upload-btn ${uploading ? 'disabled' : ''}`}
+            >
+              {uploading ? 'Uploading...' : (documents.transcript ? 'Update Transcript' : 'Upload Transcript')}
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="additional-documents">
+        <h3>Additional Documents</h3>
+        <div className="document-card">
+          <div className="document-info">
+            <p>You can upload additional supporting documents like certificates, recommendation letters, or portfolio samples.</p>
+            <p className="file-requirements">PDF only, max 5MB per file</p>
+          </div>
+          <div className="upload-section">
+            <input
+              type="file"
+              id="additional-upload"
+              accept=".pdf"
+              onChange={(e) => handleFileUpload('other', e.target.files[0])}
+              disabled={uploading}
+              style={{ display: 'none' }}
+            />
+            <label 
+              htmlFor="additional-upload" 
+              className={`upload-btn ${uploading ? 'disabled' : ''}`}
+            >
+              {uploading ? 'Uploading...' : 'Upload Additional Document'}
+            </label>
+          </div>
+        </div>
+      </div>
+
+      <div className="upload-instructions">
+        <h4>📋 Upload Guidelines:</h4>
+        <ul>
+          <li>Only PDF files are accepted</li>
+          <li>Maximum file size: 5MB per document</li>
+          <li>Name your files clearly (e.g., "John_Doe_CV.pdf")</li>
+          <li>Ensure documents are readable and up-to-date</li>
+          <li>Your CV and transcript will be automatically attached to job applications</li>
+        </ul>
       </div>
     </div>
   );
@@ -766,12 +1152,10 @@ const CourseApplicationForm = ({ onClose, onSuccess, courses, institutions, stud
   const [availableCourses, setAvailableCourses] = useState([]);
   const [loading, setLoading] = useState(false);
 
-  // Update available courses when institution changes
   useEffect(() => {
     if (formData.institutionId) {
       const institutionCourses = courses.filter(course => course.institutionId === formData.institutionId);
       setAvailableCourses(institutionCourses);
-      // Reset course selection when institution changes
       setFormData(prev => ({ ...prev, courseId: '' }));
     } else {
       setAvailableCourses([]);

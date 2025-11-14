@@ -15,6 +15,36 @@ const InstitutionProfile = ({ institution, onUpdate }) => {
   });
   const [isLoading, setIsLoading] = useState(false);
 
+  // Safe date conversion utility function
+  const safeToDate = (dateField) => {
+    if (!dateField) return null;
+    
+    // If it's a Firestore Timestamp with toDate method
+    if (dateField.toDate && typeof dateField.toDate === 'function') {
+      return dateField.toDate();
+    }
+    
+    // If it's already a Date object
+    if (dateField instanceof Date) {
+      return dateField;
+    }
+    
+    // If it's a string or number that can be converted to Date
+    try {
+      const date = new Date(dateField);
+      return !isNaN(date.getTime()) ? date : null;
+    } catch (error) {
+      console.error('Error converting to date:', error);
+      return null;
+    }
+  };
+
+  // Format date safely
+  const formatDate = (dateField) => {
+    const date = safeToDate(dateField);
+    return date ? date.toLocaleDateString() : 'N/A';
+  };
+
   useEffect(() => {
     if (institution) {
       setFormData({
@@ -197,12 +227,14 @@ const InstitutionProfile = ({ institution, onUpdate }) => {
               </div>
               <div className="info-item">
                 <strong>Registered:</strong>
-                <span>{institution.createdAt?.toDate().toLocaleDateString()}</span>
+                {/* FIXED: Using safe date formatting */}
+                <span>{formatDate(institution.createdAt)}</span>
               </div>
               {institution.updatedAt && (
                 <div className="info-item">
                   <strong>Last Updated:</strong>
-                  <span>{institution.updatedAt?.toDate().toLocaleDateString()}</span>
+                  {/* FIXED: Using safe date formatting */}
+                  <span>{formatDate(institution.updatedAt)}</span>
                 </div>
               )}
             </div>

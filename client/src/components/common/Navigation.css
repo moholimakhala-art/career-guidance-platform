@@ -19,7 +19,7 @@
 .nav-logo {
   font-size: 1.5rem;
   font-weight: bold;
-  color: #667eea;
+  color: #6b7280;
   text-decoration: none;
 }
 
@@ -44,18 +44,18 @@
 }
 
 .nav-link:hover {
-  color: #667eea;
+  color: #6b7280;
 }
 
 .login-btn {
-  background-color: #667eea;
+  background-color: #6b7280;
   color: white !important;
   padding: 8px 20px;
   border-radius: 5px;
 }
 
 .login-btn:hover {
-  background-color: #5a6fd8;
+  background-color: #4b5563;
   color: white !important;
 }
 
@@ -74,7 +74,7 @@
 }
 
 .user-role {
-  background-color: #667eea;
+  background-color: #6b7280;
   color: white;
   padding: 4px 12px;
   border-radius: 15px;

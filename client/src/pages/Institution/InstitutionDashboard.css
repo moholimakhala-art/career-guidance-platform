@@ -5,7 +5,7 @@
 }
 
 .dashboard-header {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(135deg, #6b7280 0%, #4b5563 100%);
   color: white;
   padding: 2rem;
   border-radius: 10px;
@@ -54,7 +54,7 @@
 }
 
 .nav-btn.active {
-  background-color: #667eea;
+  background-color: #6b7280;
   color: white;
 }
 
@@ -86,7 +86,7 @@
 .stat-number {
   font-size: 2rem;
   font-weight: bold;
-  color: #667eea;
+  color: #6b7280;
   margin: 0.5rem 0;
 }
 
@@ -182,7 +182,7 @@
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: #667eea;
+  border-color: #6b7280;
 }
 
 .form-row {
@@ -203,7 +203,7 @@
 
 /* Button Styles */
 .btn-primary {
-  background-color: #667eea;
+  background-color: #6b7280;
   color: white;
   border: none;
   padding: 10px 20px;
@@ -214,7 +214,7 @@
 }
 
 .btn-primary:hover {
-  background-color: #5a6fd8;
+  background-color: #4b5563;
 }
 
 .btn-primary:disabled {

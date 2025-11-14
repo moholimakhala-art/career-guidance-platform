@@ -7,16 +7,19 @@ function Login() {
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('student');
   const [name, setName] = useState('');
+  const [institutionName, setInstitutionName] = useState('');
+  const [companyName, setCompanyName] = useState('');
+  const [phone, setPhone] = useState('');
+  const [address, setAddress] = useState('');
   const [isSignUp, setIsSignUp] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [successMessage, setSuccessMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
 
   const { login, signup } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-
-  const from = location.state?.from?.pathname || `/${role}`;
 
   // Validation functions
   const validateName = (name) => {
@@ -31,7 +34,7 @@ function Login() {
   const validateEmail = (email) => {
     const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
     if (!email.trim()) return 'Email is required';
-    if (!emailRegex.test(email)) return 'Please enter a valid email address (only letters, numbers, ., and @ allowed)';
+    if (!emailRegex.test(email)) return 'Please enter a valid email address';
     return '';
   };
 
@@ -41,12 +44,25 @@ function Login() {
     return '';
   };
 
+  const validateRequiredField = (value, fieldName) => {
+    if (!value.trim()) return `${fieldName} is required`;
+    return '';
+  };
+
   const validateForm = () => {
     const errors = {};
 
     if (isSignUp) {
-      const nameError = validateName(name);
-      if (nameError) errors.name = nameError;
+      if (role === 'student') {
+        const nameError = validateName(name);
+        if (nameError) errors.name = nameError;
+      } else if (role === 'institution') {
+        const institutionError = validateRequiredField(institutionName, 'Institution name');
+        if (institutionError) errors.institutionName = institutionError;
+      } else if (role === 'company') {
+        const companyError = validateRequiredField(companyName, 'Company name');
+        if (companyError) errors.companyName = companyError;
+      }
     }
 
     const emailError = validateEmail(email);
@@ -62,6 +78,7 @@ function Login() {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
+    setSuccessMessage('');
 
     // Validate form before submission
     if (!validateForm()) {
@@ -74,43 +91,114 @@ function Login() {
     let result;
     try {
       if (isSignUp) {
+        // Prepare additional data based on role
+        let additionalData = {};
+        
+        if (role === 'student') {
+          additionalData = { name: name.trim() };
+        } else if (role === 'institution') {
+          additionalData = { 
+            name: institutionName.trim(),
+            phone: phone.trim(),
+            address: address.trim()
+          };
+        } else if (role === 'company') {
+          additionalData = { 
+            name: companyName.trim(),
+            phone: phone.trim(),
+            address: address.trim()
+          };
+        }
+
         // Sign up new user
-        result = await signup(email, password, role, name.trim());
+        console.log('Starting signup process...');
+        result = await signup(email, password, role, additionalData);
+        
+        if (result.success) {
+          setSuccessMessage('Registration successful! Please check your email to verify your account before logging in.');
+          // Clear form
+          setName('');
+          setInstitutionName('');
+          setCompanyName('');
+          setPhone('');
+          setAddress('');
+          setEmail('');
+          setPassword('');
+          
+          console.log('Signup successful - user should verify email before logging in');
+          // Don't redirect - user needs to verify email first
+        } else {
+          setError(result.error || 'Signup failed. Please try again.');
+        }
       } else {
         // Log in existing user
+        console.log('Attempting login...');
         result = await login(email, password);
-      }
-      
-      if (result.success) {
-        navigate(from, { replace: true });
-      } else {
-        setError(result.error);
+        
+        if (result.success) {
+          console.log('Login successful, user role:', result.userRole);
+          
+          // Get the actual user role from the login result
+          const userRole = result.userRole || 'student';
+          const from = location.state?.from?.pathname || `/${userRole}`;
+          
+          console.log('Redirecting to:', from, 'for role:', userRole);
+          
+          // Small delay to ensure state is updated before navigation
+          setTimeout(() => {
+            navigate(from, { replace: true });
+          }, 100);
+        } else {
+          setError(result.error || 'Login failed. Please try again.');
+        }
       }
     } catch (err) {
-      setError('An error occurred. Please try again.');
-      console.error('Auth error:', err);
+      console.error('Auth process error:', err);
+      setError('An unexpected error occurred. Please try again.');
     } finally {
       setLoading(false);
     }
   };
 
   const handleNameChange = (value) => {
-    // Only allow letters and spaces
     const cleanedValue = value.replace(/[^A-Za-z\s]/g, '');
     setName(cleanedValue);
     
-    // Clear error when user starts typing
     if (fieldErrors.name) {
       setFieldErrors(prev => ({ ...prev, name: '' }));
     }
   };
 
+  const handleInstitutionNameChange = (value) => {
+    setInstitutionName(value);
+    
+    if (fieldErrors.institutionName) {
+      setFieldErrors(prev => ({ ...prev, institutionName: '' }));
+    }
+  };
+
+  const handleCompanyNameChange = (value) => {
+    setCompanyName(value);
+    
+    if (fieldErrors.companyName) {
+      setFieldErrors(prev => ({ ...prev, companyName: '' }));
+    }
+  };
+
+  const handlePhoneChange = (value) => {
+    // Allow only numbers, spaces, and common phone characters
+    const cleanedValue = value.replace(/[^0-9\s+\-()]/g, '');
+    setPhone(cleanedValue);
+  };
+
+  const handleAddressChange = (value) => {
+    setAddress(value);
+  };
+
   const handleEmailChange = (value) => {
-    // Allow only letters, numbers, ., @, +, -, and _
     const cleanedValue = value.replace(/[^A-Za-z0-9.@_%+-]/g, '');
     setEmail(cleanedValue);
     
-    // Clear error when user starts typing
     if (fieldErrors.email) {
       setFieldErrors(prev => ({ ...prev, email: '' }));
     }
@@ -119,7 +207,6 @@ function Login() {
   const handlePasswordChange = (value) => {
     setPassword(value);
     
-    // Clear error when user starts typing
     if (fieldErrors.password) {
       setFieldErrors(prev => ({ ...prev, password: '' }));
     }
@@ -127,16 +214,28 @@ function Login() {
 
   const handleRoleChange = (value) => {
     setRole(value);
+    // Clear all field errors when role changes
+    setFieldErrors({});
   };
 
   const handleToggleSignUp = () => {
     setIsSignUp(!isSignUp);
-    // Clear all errors and fields when toggling
     setError('');
+    setSuccessMessage('');
     setFieldErrors({});
     if (!isSignUp) {
-      // When switching to signup, clear name field
+      // When switching to signup, clear all fields
       setName('');
+      setInstitutionName('');
+      setCompanyName('');
+      setPhone('');
+      setAddress('');
+    } else {
+      // When switching to login, reset role to default
+      setRole('student');
+      // Clear form fields
+      setEmail('');
+      setPassword('');
     }
   };
 
@@ -167,6 +266,21 @@ function Login() {
     backgroundColor: hasError ? '#fff5f5' : 'white'
   });
 
+  const getRoleDescription = () => {
+    switch (role) {
+      case 'student':
+        return 'Search for courses and job opportunities, upload documents, and receive offers';
+      case 'institution':
+        return 'Manage courses, review student applications, and send course offers';
+      case 'company':
+        return 'Post job opportunities, review applications, and send job offers';
+      case 'admin':
+        return 'Manage system users, institutions, companies, and overall platform';
+      default:
+        return '';
+    }
+  };
+
   return (
     <div style={{
       display: 'flex',
@@ -181,10 +295,10 @@ function Login() {
         borderRadius: '10px',
         boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
         width: '100%',
-        maxWidth: '400px'
+        maxWidth: '450px'
       }}>
         <h2 style={{ textAlign: 'center', marginBottom: '30px', color: '#2c3e50' }}>
-          {isSignUp ? ' Create Account' : ' Login to Career Guidance'}
+          {isSignUp ? 'Create Account' : 'Login to Career Guidance'}
         </h2>
 
         {error && (
@@ -201,41 +315,194 @@ function Login() {
           </div>
         )}
 
+        {successMessage && (
+          <div style={{
+            backgroundColor: '#d4edda',
+            color: '#155724',
+            padding: '15px',
+            borderRadius: '5px',
+            marginBottom: '20px',
+            textAlign: 'center',
+            border: '1px solid #c3e6cb',
+            fontSize: '14px',
+            lineHeight: '1.5'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px', marginBottom: '8px' }}>
+              <span style={{ fontSize: '18px' }}>🎉</span>
+              <strong>Registration Successful!</strong>
+            </div>
+            {successMessage}
+            <div style={{ marginTop: '10px', fontSize: '13px', color: '#0f5132' }}>
+              <strong>Don't see the email?</strong> Check your spam folder or request a new verification email from your account settings after logging in.
+            </div>
+            <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#c3e6cb', borderRadius: '4px' }}>
+              <strong>Next Step:</strong> Verify your email, then come back here to login.
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit}>
+          {/* Role selection - only show during signup */}
           {isSignUp && (
-            <div style={{ marginBottom: '15px' }}>
-              <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-                Full Name *
+            <div style={{ marginBottom: '20px' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+                I am a... *
               </label>
-              <input
-                type="text"
-                value={name}
-                onChange={(e) => handleNameChange(e.target.value)}
+              <select
+                value={role}
+                onChange={(e) => handleRoleChange(e.target.value)}
+                style={inputStyle(false)}
                 required={isSignUp}
-                style={inputStyle(fieldErrors.name)}
-                placeholder="Enter your full name (letters only)"
-                maxLength={50}
-              />
-              {renderError('name')}
+              >
+                <option value="student">Student</option>
+                <option value="institution">Institution/University</option>
+                <option value="company">Company/Employer</option>
+                <option value="admin">Administrator</option>
+              </select>
+              <p style={{ 
+                fontSize: '0.8rem', 
+                color: '#666', 
+                marginTop: '8px',
+                padding: '8px',
+                backgroundColor: '#f8f9fa',
+                borderRadius: '4px',
+                fontStyle: 'italic'
+              }}>
+                {getRoleDescription()}
+              </p>
             </div>
           )}
 
-          <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
-              Role
-            </label>
-            <select
-              value={role}
-              onChange={(e) => handleRoleChange(e.target.value)}
-              style={inputStyle(false)}
-            >
-              <option value="student">Student</option>
-              <option value="institution">Institution</option>
-              <option value="company">Company</option>
-              <option value="admin">Admin</option>
-            </select>
-          </div>
+          {/* Dynamic form fields based on role */}
+          {isSignUp && (
+            <>
+              {role === 'student' && (
+                <div style={{ marginBottom: '15px' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    Full Name *
+                  </label>
+                  <input
+                    type="text"
+                    value={name}
+                    onChange={(e) => handleNameChange(e.target.value)}
+                    required
+                    style={inputStyle(fieldErrors.name)}
+                    placeholder="Enter your full name"
+                    maxLength={50}
+                  />
+                  {renderError('name')}
+                </div>
+              )}
 
+              {role === 'institution' && (
+                <>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Institution Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={institutionName}
+                      onChange={(e) => handleInstitutionNameChange(e.target.value)}
+                      required
+                      style={inputStyle(fieldErrors.institutionName)}
+                      placeholder="Enter your institution name"
+                      maxLength={100}
+                    />
+                    {renderError('institutionName')}
+                  </div>
+                  
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => handlePhoneChange(e.target.value)}
+                      style={inputStyle(false)}
+                      placeholder="Enter phone number"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Address
+                    </label>
+                    <textarea
+                      value={address}
+                      onChange={(e) => handleAddressChange(e.target.value)}
+                      style={inputStyle(false)}
+                      placeholder="Enter institution address"
+                      rows="3"
+                    />
+                  </div>
+                </>
+              )}
+
+              {role === 'company' && (
+                <>
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Company Name *
+                    </label>
+                    <input
+                      type="text"
+                      value={companyName}
+                      onChange={(e) => handleCompanyNameChange(e.target.value)}
+                      required
+                      style={inputStyle(fieldErrors.companyName)}
+                      placeholder="Enter your company name"
+                      maxLength={100}
+                    />
+                    {renderError('companyName')}
+                  </div>
+                  
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Phone Number
+                    </label>
+                    <input
+                      type="tel"
+                      value={phone}
+                      onChange={(e) => handlePhoneChange(e.target.value)}
+                      style={inputStyle(false)}
+                      placeholder="Enter phone number"
+                    />
+                  </div>
+
+                  <div style={{ marginBottom: '15px' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                      Address
+                    </label>
+                    <textarea
+                      value={address}
+                      onChange={(e) => handleAddressChange(e.target.value)}
+                      style={inputStyle(false)}
+                      placeholder="Enter company address"
+                      rows="3"
+                    />
+                  </div>
+                </>
+              )}
+
+              {role === 'admin' && (
+                <div style={{ 
+                  marginBottom: '15px',
+                  padding: '10px',
+                  backgroundColor: '#fff3cd',
+                  border: '1px solid #ffeaa7',
+                  borderRadius: '5px',
+                  fontSize: '14px',
+                  color: '#856404'
+                }}>
+                  <strong>Admin Registration:</strong> Please use an authorized admin email or contact system administrator for access.
+                </div>
+              )}
+            </>
+          )}
+
+          {/* Common fields for all roles */}
           <div style={{ marginBottom: '15px' }}>
             <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
               Email *
@@ -309,6 +576,22 @@ function Login() {
             {isSignUp ? 'Already have an account? Login' : "Don't have an account? Sign up"}
           </button>
         </div>
+
+        {isSignUp && (
+          <div style={{
+            marginTop: '20px',
+            padding: '15px',
+            backgroundColor: '#e7f3ff',
+            borderRadius: '5px',
+            border: '1px solid #b3d9ff',
+            fontSize: '13px',
+            color: '#0066cc',
+            textAlign: 'center'
+          }}>
+            <strong>Important:</strong> After registration, you will receive a verification email. 
+            You must verify your email before you can log in to your account. Your role ({role}) will determine your dashboard features.
+          </div>
+        )} 
       </div>
     </div>
   );
