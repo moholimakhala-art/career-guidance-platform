@@ -27,7 +27,7 @@ export const AuthProvider = ({ children }) => {
 
   useEffect(() => {
     const unsubscribe = onAuthStateChanged(auth, async (firebaseUser) => {
-      console.log(' Auth state changed:', firebaseUser ? firebaseUser.uid : 'No user');
+      console.log('🔄 Auth state changed:', firebaseUser ? firebaseUser.uid : 'No user');
       
       setLoading(true);
       
@@ -36,38 +36,48 @@ export const AuthProvider = ({ children }) => {
         setUser(firebaseUser);
         
         try {
-          console.log(' Fetching user data from Firestore for UID:', firebaseUser.uid);
+          console.log('📄 Fetching user data from Firestore for UID:', firebaseUser.uid);
           const userDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
           
           if (userDoc.exists()) {
             const userData = userDoc.data();
-            console.log(' User data loaded:', userData);
+            console.log('✅ User data loaded:', { 
+              uid: userData.uid, 
+              email: userData.email, 
+              role: userData.role 
+            });
             setUserData(userData);
           } else {
-            console.log(' User authenticated but no data in Firestore');
-            console.warn(' User document not found - this may be normal during signup');
+            console.log('⚠️ User authenticated but no data in Firestore');
             
-            // Instead of signing out, wait and retry once
-            console.log(' Waiting and retrying Firestore fetch...');
-            await new Promise(resolve => setTimeout(resolve, 2000));
+            // Create a minimal user data object to prevent crashes
+            const minimalUserData = {
+              uid: firebaseUser.uid,
+              email: firebaseUser.email,
+              role: 'student', // default role
+              emailVerified: firebaseUser.emailVerified,
+              profileCompleted: false
+            };
             
-            const retryDoc = await getDoc(doc(db, 'users', firebaseUser.uid));
-            if (retryDoc.exists()) {
-              const userData = retryDoc.data();
-              console.log(' User data found on retry:', userData);
-              setUserData(userData);
-            } else {
-              console.error(' User document still not found after retry');
-              // Only sign out if we're confident this isn't a new signup
-              // For now, just set empty userData and let the user flow handle it
-              setUserData(null);
-            }
+            console.log('🔄 Creating minimal user data for session');
+            setUserData(minimalUserData);
           }
         } catch (error) {
-          console.error(' Error fetching user data:', error);
-          setUserData(null);
+          console.error('❌ Error fetching user data:', error);
+          
+          // Create fallback user data to prevent crashes
+          const fallbackUserData = {
+            uid: firebaseUser.uid,
+            email: firebaseUser.email,
+            role: 'student',
+            emailVerified: firebaseUser.emailVerified,
+            profileCompleted: false
+          };
+          
+          setUserData(fallbackUserData);
         }
       } else {
+        console.log('🚪 No user signed in');
         setUser(null);
         setUserData(null);
       }
@@ -81,154 +91,186 @@ export const AuthProvider = ({ children }) => {
   const login = async (email, password) => {
     try {
       console.log('🔐 Attempting login with:', email);
+      
+      // Clear any previous state
+      setLoading(true);
+      
       const userCredential = await signInWithEmailAndPassword(auth, email, password);
       const user = userCredential.user;
       
       console.log('✅ Firebase auth successful, user:', user.uid);
       console.log('📧 Email verified status:', user.emailVerified);
       
-      // Verify user data exists in Firestore and get their actual role
-      console.log('📄 Checking user document in Firestore...');
+      // Check if email is verified - BLOCK LOGIN IF NOT VERIFIED
+      if (!user.emailVerified) {
+        console.log('🚫 Login blocked: Email not verified');
+        
+        // Sign out the user since they can't access the app
+        await signOut(auth);
+        
+        return { 
+          success: false, 
+          error: 'Please verify your email address before logging in. Check your inbox for the verification email.',
+          emailVerified: false
+        };
+      }
+      
+      // Get user data from Firestore
+      console.log('📄 Fetching user data from Firestore...');
       const userDoc = await getDoc(doc(db, 'users', user.uid));
       
       if (!userDoc.exists()) {
         console.error('❌ User document does not exist in Firestore');
         
-        // Instead of auto-signout, give it a retry
-        console.log('🔄 Retrying Firestore fetch...');
-        await new Promise(resolve => setTimeout(resolve, 1500));
+        // Create a temporary user data object to allow login
+        const tempUserData = {
+          uid: user.uid,
+          email: user.email,
+          role: 'student',
+          emailVerified: user.emailVerified,
+          profileCompleted: false,
+          temporary: true
+        };
         
-        const retryDoc = await getDoc(doc(db, 'users', user.uid));
-        if (!retryDoc.exists()) {
-          console.error('❌ User document still not found after retry');
-          await signOut(auth);
-          return { 
-            success: false, 
-            error: 'Account data not found. Please contact support.' 
-          };
-        } else {
-          console.log('✅ User document found on retry');
-          const userData = retryDoc.data();
-          setUserData(userData);
-          return { 
-            success: true, 
-            user, 
-            userRole: userData.role,
-            emailVerified: user.emailVerified 
-          };
-        }
+        console.log('🔄 Using temporary user data');
+        setUserData(tempUserData);
+        
+        return { 
+          success: true, 
+          user: tempUserData, 
+          userRole: 'student',
+          emailVerified: user.emailVerified,
+          temporary: true
+        };
       }
       
       const userData = userDoc.data();
-      console.log('✅ User document found:', userData);
-      console.log('🎭 User role:', userData.role);
+      console.log('✅ User document found:', { 
+        uid: userData.uid, 
+        email: userData.email, 
+        role: userData.role 
+      });
       
-      // Check if email is verified - but don't auto-signout
-      if (!user.emailVerified) {
-        console.log('⚠️ Email not verified yet, but allowing access');
-        // Don't sign out - just show a warning but allow login
-      }
-      
-      // Update userData state immediately so it's available for redirects
+      // Update userData state
       setUserData(userData);
       
-      console.log('🎉 Firebase login successful');
+      console.log('🎉 Login successful, redirecting to:', `/${userData.role}`);
+      
       return { 
         success: true, 
-        user, 
+        user: userData, 
         userRole: userData.role,
         emailVerified: user.emailVerified 
       };
+      
     } catch (error) {
-      console.error('💥 Login error details:');
+      console.error('💥 Login error:', error);
       console.error('Error code:', error.code);
       console.error('Error message:', error.message);
-      console.error('Full error:', error);
       
       let errorMessage = 'An error occurred during login. Please try again.';
       
-      if (error.code === 'auth/invalid-credential') {
-        errorMessage = 'Invalid email or password. Please check your credentials and try again.';
-      } else if (error.code === 'auth/user-not-found') {
-        errorMessage = 'No account found with this email address.';
-      } else if (error.code === 'auth/wrong-password') {
-        errorMessage = 'Incorrect password. Please try again.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address format.';
-      } else if (error.code === 'auth/too-many-requests') {
-        errorMessage = 'Too many failed login attempts. Please try again later.';
-      } else if (error.code === 'auth/user-disabled') {
-        errorMessage = 'This account has been disabled. Please contact support.';
+      switch (error.code) {
+        case 'auth/invalid-credential':
+        case 'auth/wrong-password':
+          errorMessage = 'Invalid email or password. Please check your credentials.';
+          break;
+        case 'auth/user-not-found':
+          errorMessage = 'No account found with this email address.';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address format.';
+          break;
+        case 'auth/too-many-requests':
+          errorMessage = 'Too many failed login attempts. Please try again later.';
+          break;
+        case 'auth/user-disabled':
+          errorMessage = 'This account has been disabled. Please contact support.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection.';
+          break;
+        default:
+          errorMessage = `Login failed: ${error.message}`;
       }
       
       return { success: false, error: errorMessage };
+    } finally {
+      setLoading(false);
     }
   };
 
   const signup = async (email, password, role, additionalData = {}) => {
     let user = null;
+    let userCreated = false;
     
     try {
-      console.log(' Starting signup process for:', email, 'Role:', role);
+      console.log('🚀 Starting signup process for:', email, 'Role:', role);
       
       // Step 1: Create Firebase Auth user
       const userCredential = await createUserWithEmailAndPassword(auth, email, password);
       user = userCredential.user;
+      userCreated = true;
       
-      console.log(' Firebase user created with UID:', user.uid);
+      console.log('✅ Firebase user created with UID:', user.uid);
       
-      // Step 2: Prepare user data
+      // Step 2: Prepare comprehensive user data
       const userData = {
         uid: user.uid,
         email: email,
         role: role,
         createdAt: new Date(),
+        updatedAt: new Date(),
         profileCompleted: false,
-        emailVerified: false,
+        emailVerified: false, // Always false initially
         status: 'active',
         ...additionalData
       };
 
-      // Add role-specific data
+      // Add role-specific default data
       if (role === 'student') {
-        userData.name = additionalData.name || email.split('@')[0];
+        userData.name = additionalData.name || '';
+        userData.academicResults = {};
         userData.documents = {
           cv: null,
           transcript: null,
           otherDocuments: []
         };
+        userData.applications = [];
       } else if (role === 'institution') {
-        userData.name = additionalData.name || email.split('@')[0];
-        userData.institutionName = additionalData.name;
+        userData.name = additionalData.name || '';
+        userData.institutionName = additionalData.name || '';
         userData.phone = additionalData.phone || '';
         userData.address = additionalData.address || '';
+        userData.courses = [];
       } else if (role === 'company') {
-        userData.name = additionalData.name || email.split('@')[0];
-        userData.companyName = additionalData.name;
+        userData.name = additionalData.name || '';
+        userData.companyName = additionalData.name || '';
         userData.phone = additionalData.phone || '';
         userData.address = additionalData.address || '';
+        userData.jobs = [];
       } else if (role === 'admin') {
         userData.name = additionalData.name || 'Administrator';
       }
 
-      console.log(' Saving user data to Firestore...');
+      console.log('💾 Saving user data to Firestore...');
       
-      // Step 3: Save user document FIRST (before email verification)
+      // Step 3: Save user document to Firestore
       await setDoc(doc(db, 'users', user.uid), userData);
-      console.log(' User document created successfully');
+      console.log('✅ User document created successfully');
 
-      // Step 4: Wait a moment to ensure Firestore write is complete
-      await new Promise(resolve => setTimeout(resolve, 1000));
+      // Step 4: Wait briefly to ensure Firestore write is complete
+      await new Promise(resolve => setTimeout(resolve, 500));
 
-      console.log(' Sending verification email...');
+      console.log('📧 Sending verification email...');
       // Step 5: Send email verification
       await sendEmailVerification(user);
-      console.log(' Verification email sent');
+      console.log('✅ Verification email sent');
 
-      // Step 6: Create role-specific documents
-      if (role === 'institution') {
+      // Step 6: Create role-specific documents if needed
+      if (role === 'institution' && additionalData.name) {
         try {
-          console.log(' Creating institution document with ID:', user.uid);
+          console.log('🏫 Creating institution document...');
           const institutionData = {
             id: user.uid,
             name: additionalData.name,
@@ -241,14 +283,14 @@ export const AuthProvider = ({ children }) => {
           };
           
           await setDoc(doc(db, 'institutions', user.uid), institutionData);
-          console.log(' Institution document created successfully');
+          console.log('✅ Institution document created successfully');
         } catch (institutionError) {
-          console.error(' Error creating institution document:', institutionError);
-          // Continue anyway - user account is created
+          console.error('⚠️ Error creating institution document:', institutionError);
+          // Continue - user account is the main priority
         }
-      } else if (role === 'company') {
+      } else if (role === 'company' && additionalData.name) {
         try {
-          console.log(' Creating company document with ID:', user.uid);
+          console.log('🏢 Creating company document...');
           const companyData = {
             id: user.uid,
             name: additionalData.name,
@@ -261,76 +303,121 @@ export const AuthProvider = ({ children }) => {
           };
           
           await setDoc(doc(db, 'companies', user.uid), companyData);
-          console.log(' Company document created successfully');
+          console.log('✅ Company document created successfully');
         } catch (companyError) {
-          console.error(' Error creating company document:', companyError);
-          // Continue anyway - user account is created
+          console.error('⚠️ Error creating company document:', companyError);
+          // Continue - user account is the main priority
         }
       }
       
-      console.log(' User registration completed successfully');
+      console.log('🎉 User registration completed successfully');
+      
+      // Update local state
+      setUserData(userData);
       
       return { 
         success: true, 
-        user,
+        user: userData,
         userRole: role,
         message: 'Registration successful! Please check your email for the verification link.' 
       };
-    } catch (error) {
-      console.error(' Signup error:', error);
-      console.error(' Error code:', error.code);
-      console.error(' Error message:', error.message);
       
-      // If user was created but something else failed, try to clean up
-      if (user) {
+    } catch (error) {
+      console.error('❌ Signup error:', error);
+      console.error('Error code:', error.code);
+      console.error('Error message:', error.message);
+      
+      // Clean up if user was created but something else failed
+      if (userCreated && user) {
         try {
+          console.log('🧹 Cleaning up failed signup...');
+          
           // Delete the auth user
           await user.delete();
-          console.log('Cleaned up user account due to signup failure');
+          console.log('✅ Auth user cleaned up');
           
-          // Also try to delete any Firestore documents that might have been created
+          // Try to delete Firestore documents
           try {
             await deleteDoc(doc(db, 'users', user.uid));
+            console.log('✅ User document cleaned up');
           } catch (firestoreError) {
-            console.log('No user document to clean up');
+            console.log('ℹ️ No user document to clean up');
           }
+          
+          // Clean up role-specific documents
+          if (role === 'institution') {
+            try {
+              await deleteDoc(doc(db, 'institutions', user.uid));
+            } catch (e) { /* ignore */ }
+          } else if (role === 'company') {
+            try {
+              await deleteDoc(doc(db, 'companies', user.uid));
+            } catch (e) { /* ignore */ }
+          }
+          
         } catch (deleteError) {
-          console.error('Failed to clean up user account:', deleteError);
+          console.error('⚠️ Failed to clean up user account:', deleteError);
         }
       }
       
       let errorMessage = 'An error occurred during registration. Please try again.';
       
-      if (error.code === 'auth/email-already-in-use') {
-        errorMessage = 'An account with this email already exists. Please use a different email or try logging in.';
-      } else if (error.code === 'auth/weak-password') {
-        errorMessage = 'Password is too weak. Please use at least 6 characters.';
-      } else if (error.code === 'auth/invalid-email') {
-        errorMessage = 'Invalid email address format.';
-      } else if (error.code === 'auth/operation-not-allowed') {
-        errorMessage = 'Email/password accounts are not enabled. Please contact support.';
-      } else if (error.code === 'permission-denied') {
-        errorMessage = 'Database permission denied. Please check your Firebase security rules.';
+      switch (error.code) {
+        case 'auth/email-already-in-use':
+          errorMessage = 'An account with this email already exists. Please use a different email or try logging in.';
+          break;
+        case 'auth/weak-password':
+          errorMessage = 'Password is too weak. Please use at least 6 characters.';
+          break;
+        case 'auth/invalid-email':
+          errorMessage = 'Invalid email address format.';
+          break;
+        case 'auth/operation-not-allowed':
+          errorMessage = 'Email/password accounts are not enabled. Please contact support.';
+          break;
+        case 'auth/network-request-failed':
+          errorMessage = 'Network error. Please check your internet connection.';
+          break;
+        case 'permission-denied':
+          errorMessage = 'Database permission denied. Please check your Firebase security rules.';
+          break;
+        default:
+          errorMessage = `Registration failed: ${error.message}`;
       }
       
       return { success: false, error: errorMessage };
     }
   };
 
-  const resendVerificationEmail = async () => {
+  const resendVerificationEmail = async (email) => {
     try {
-      if (!user) {
-        return { success: false, error: 'No user is currently logged in.' };
+      // If no specific email provided, use current user
+      if (!email && user) {
+        await sendEmailVerification(user);
+        return { 
+          success: true, 
+          message: 'Verification email sent! Please check your inbox.' 
+        };
       }
       
-      await sendEmailVerification(user);
+      // If email is provided, we need to sign in the user first to resend verification
+      if (email) {
+        return { 
+          success: false, 
+          error: 'Please log in first to resend verification email, or use the password reset feature if you cannot access your account.' 
+        };
+      }
+      
       return { 
-        success: true, 
-        message: 'Verification email sent! Please check your inbox.' 
+        success: false, 
+        error: 'No user is currently logged in.' 
       };
     } catch (error) {
-      console.error(' Resend verification error:', error);
-      return { success: false, error: error.message };
+      console.error('❌ Resend verification error:', error);
+      return { 
+        success: false, 
+        error: 'Failed to send verification email. Please try again.' 
+      };
     }
   };
 
@@ -342,9 +429,9 @@ export const AuthProvider = ({ children }) => {
         message: 'Password reset email sent! Please check your inbox.' 
       };
     } catch (error) {
-      console.error(' Password reset error:', error);
+      console.error('❌ Password reset error:', error);
       
-      let errorMessage = error.message;
+      let errorMessage = 'Failed to send password reset email.';
       if (error.code === 'auth/user-not-found') {
         errorMessage = 'No account found with this email address.';
       } else if (error.code === 'auth/invalid-email') {
@@ -357,11 +444,14 @@ export const AuthProvider = ({ children }) => {
 
   const logout = async () => {
     try {
+      console.log('🚪 Logging out user...');
       await signOut(auth);
+      setUser(null);
       setUserData(null);
+      console.log('✅ Logout successful');
       return { success: true };
     } catch (error) {
-      console.error(' Logout error:', error);
+      console.error('❌ Logout error:', error);
       return { success: false, error: error.message };
     }
   };
@@ -372,11 +462,19 @@ export const AuthProvider = ({ children }) => {
         return { success: false, error: 'No user is currently logged in.' };
       }
       
-      await setDoc(doc(db, 'users', user.uid), updates, { merge: true });
-      setUserData(prev => ({ ...prev, ...updates }));
+      const updatedData = {
+        ...updates,
+        updatedAt: new Date()
+      };
+      
+      await setDoc(doc(db, 'users', user.uid), updatedData, { merge: true });
+      
+      // Update local state
+      setUserData(prev => ({ ...prev, ...updatedData }));
+      
       return { success: true };
     } catch (error) {
-      console.error(' Update profile error:', error);
+      console.error('❌ Update profile error:', error);
       return { success: false, error: error.message };
     }
   };
@@ -397,32 +495,26 @@ export const AuthProvider = ({ children }) => {
   };
 
   const value = {
+    // User state
     currentUser: user,
     user: user,
     userData: userData,
     userRole: userData?.role,
-    login,
-    signup,
-    logout,
     loading,
     isAuthenticated: !!user,
     emailVerified: user?.emailVerified || false,
     
+    // Auth methods
+    login,
+    signup,
+    logout,
     resendVerificationEmail,
     resetPassword,
     updateUserProfile,
     
+    // Permissions
     hasPermission
   };
-
-  console.log('🔄 AuthContext value:', { 
-    user: user?.uid, 
-    userData, 
-    loading,
-    isAuthenticated: !!user,
-    emailVerified: user?.emailVerified,
-    role: userData?.role
-  });
 
   return (
     <AuthContext.Provider value={value}>

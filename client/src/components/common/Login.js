@@ -16,12 +16,38 @@ function Login() {
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [fieldErrors, setFieldErrors] = useState({});
+  const [verificationSent, setVerificationSent] = useState(false);
+  const [unverifiedEmail, setUnverifiedEmail] = useState('');
 
-  const { login, signup } = useAuth();
+  const { login, signup, resendVerificationEmail } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
 
-  // Validation functions
+  // Simplified email validation - focus on disposable emails only
+  const validateEmail = (email) => {
+    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
+    
+    if (!email.trim()) return 'Email is required';
+    if (!emailRegex.test(email)) return 'Please enter a valid email address';
+    
+    // Focus on major disposable email domains only
+    const disposableDomains = [
+      'tempmail.com', 'guerrillamail.com', 'mailinator.com', '10minutemail.com',
+      'yopmail.com', 'throwaway.com', 'fake.com', 'trashmail.com', 'temp-mail.org',
+      'disposable.com', 'tempmail.net', 'fakeinbox.com', 'getairmail.com',
+      'sharklasers.com', 'maildrop.cc', 'getnada.com', 'tmpmail.org'
+    ];
+    
+    const domain = email.split('@')[1].toLowerCase();
+    
+    // Check for disposable email domains
+    if (disposableDomains.some(disposable => domain.includes(disposable))) {
+      return 'Disposable email addresses are not allowed. Please use a permanent email.';
+    }
+    
+    return '';
+  };
+
   const validateName = (name) => {
     const nameRegex = /^[A-Za-z\s]+$/;
     if (!name.trim()) return 'Name is required';
@@ -31,16 +57,13 @@ function Login() {
     return '';
   };
 
-  const validateEmail = (email) => {
-    const emailRegex = /^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$/;
-    if (!email.trim()) return 'Email is required';
-    if (!emailRegex.test(email)) return 'Please enter a valid email address';
-    return '';
-  };
-
   const validatePassword = (password) => {
     if (!password) return 'Password is required';
-    if (isSignUp && password.length < 6) return 'Password must be at least 6 characters long';
+    if (isSignUp) {
+      if (password.length < 8) return 'Password must be at least 8 characters long';
+      if (!/(?=.*[a-z])(?=.*[A-Z])/.test(password)) return 'Password must contain both uppercase and lowercase letters';
+      if (!/(?=.*\d)/.test(password)) return 'Password must contain at least one number';
+    }
     return '';
   };
 
@@ -79,6 +102,8 @@ function Login() {
     e.preventDefault();
     setError('');
     setSuccessMessage('');
+    setVerificationSent(false);
+    setUnverifiedEmail('');
 
     // Validate form before submission
     if (!validateForm()) {
@@ -95,27 +120,38 @@ function Login() {
         let additionalData = {};
         
         if (role === 'student') {
-          additionalData = { name: name.trim() };
+          additionalData = { 
+            name: name.trim(),
+            role: 'student'
+          };
         } else if (role === 'institution') {
           additionalData = { 
             name: institutionName.trim(),
             phone: phone.trim(),
-            address: address.trim()
+            address: address.trim(),
+            role: 'institution'
           };
         } else if (role === 'company') {
           additionalData = { 
             name: companyName.trim(),
             phone: phone.trim(),
-            address: address.trim()
+            address: address.trim(),
+            role: 'company'
+          };
+        } else if (role === 'admin') {
+          additionalData = {
+            role: 'admin'
           };
         }
 
-        // Sign up new user
-        console.log('Starting signup process...');
+        console.log('Starting signup process...', { email, role, additionalData });
         result = await signup(email, password, role, additionalData);
         
         if (result.success) {
           setSuccessMessage('Registration successful! Please check your email to verify your account before logging in.');
+          setVerificationSent(true);
+          setUnverifiedEmail(email);
+          
           // Clear form
           setName('');
           setInstitutionName('');
@@ -125,21 +161,31 @@ function Login() {
           setEmail('');
           setPassword('');
           
-          console.log('Signup successful - user should verify email before logging in');
-          // Don't redirect - user needs to verify email first
+          console.log('Signup successful - verification email sent');
         } else {
           setError(result.error || 'Signup failed. Please try again.');
         }
       } else {
         // Log in existing user
-        console.log('Attempting login...');
+        console.log('Attempting login...', { email });
         result = await login(email, password);
         
+        console.log('Login result:', result);
+        
         if (result.success) {
-          console.log('Login successful, user role:', result.userRole);
+          // Check if email is verified
+          if (!result.emailVerified) {
+            setError('Please verify your email address before logging in. Check your inbox for the verification email.');
+            setUnverifiedEmail(email);
+            setVerificationSent(true);
+            setLoading(false);
+            return;
+          }
+
+          console.log('Login successful, user role:', result.user?.role, result.userRole);
           
           // Get the actual user role from the login result
-          const userRole = result.userRole || 'student';
+          const userRole = result.user?.role || result.userRole || 'student';
           const from = location.state?.from?.pathname || `/${userRole}`;
           
           console.log('Redirecting to:', from, 'for role:', userRole);
@@ -149,12 +195,39 @@ function Login() {
             navigate(from, { replace: true });
           }, 100);
         } else {
-          setError(result.error || 'Login failed. Please try again.');
+          setError(result.error || 'Login failed. Please check your credentials and try again.');
         }
       }
     } catch (err) {
       console.error('Auth process error:', err);
       setError('An unexpected error occurred. Please try again.');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // Resend verification email
+  const handleResendVerification = async () => {
+    const emailToVerify = unverifiedEmail || email;
+    
+    if (!emailToVerify) {
+      setError('Please enter your email address first');
+      return;
+    }
+
+    setLoading(true);
+    setError('');
+    
+    try {
+      const result = await resendVerificationEmail(emailToVerify);
+      if (result.success) {
+        setSuccessMessage('Verification email sent! Please check your inbox and spam folder.');
+        setVerificationSent(true);
+      } else {
+        setError(result.error || 'Failed to send verification email. Please try again.');
+      }
+    } catch (err) {
+      setError('Failed to send verification email. Please try again.');
     } finally {
       setLoading(false);
     }
@@ -186,7 +259,6 @@ function Login() {
   };
 
   const handlePhoneChange = (value) => {
-    // Allow only numbers, spaces, and common phone characters
     const cleanedValue = value.replace(/[^0-9\s+\-()]/g, '');
     setPhone(cleanedValue);
   };
@@ -214,7 +286,6 @@ function Login() {
 
   const handleRoleChange = (value) => {
     setRole(value);
-    // Clear all field errors when role changes
     setFieldErrors({});
   };
 
@@ -223,17 +294,17 @@ function Login() {
     setError('');
     setSuccessMessage('');
     setFieldErrors({});
+    setVerificationSent(false);
+    setUnverifiedEmail('');
+    
     if (!isSignUp) {
-      // When switching to signup, clear all fields
       setName('');
       setInstitutionName('');
       setCompanyName('');
       setPhone('');
       setAddress('');
     } else {
-      // When switching to login, reset role to default
       setRole('student');
-      // Clear form fields
       setEmail('');
       setPassword('');
     }
@@ -258,12 +329,13 @@ function Login() {
 
   const inputStyle = (hasError) => ({
     width: '100%',
-    padding: '10px',
+    padding: '12px',
     border: `1px solid ${hasError ? '#dc3545' : '#ddd'}`,
     borderRadius: '5px',
     fontSize: '16px',
     boxSizing: 'border-box',
-    backgroundColor: hasError ? '#fff5f5' : 'white'
+    backgroundColor: hasError ? '#fff5f5' : 'white',
+    transition: 'border-color 0.3s ease'
   });
 
   const getRoleDescription = () => {
@@ -281,13 +353,29 @@ function Login() {
     }
   };
 
+  const getEmailPlaceholder = () => {
+    switch (role) {
+      case 'student':
+        return 'your.email@gmail.com';
+      case 'institution':
+        return 'name@university.edu';
+      case 'company':
+        return 'name@company.com';
+      case 'admin':
+        return 'admin@system.com';
+      default:
+        return 'Enter your email';
+    }
+  };
+
   return (
     <div style={{
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'center',
       minHeight: '80vh',
-      padding: '20px'
+      padding: '20px',
+      backgroundColor: '#f5f5f5'
     }}>
       <div style={{
         backgroundColor: 'white',
@@ -305,13 +393,34 @@ function Login() {
           <div style={{
             backgroundColor: '#f8d7da',
             color: '#721c24',
-            padding: '10px',
+            padding: '12px',
             borderRadius: '5px',
             marginBottom: '20px',
             textAlign: 'center',
-            border: '1px solid #f5c6cb'
+            border: '1px solid #f5c6cb',
+            fontSize: '14px'
           }}>
             {error}
+            {verificationSent && (
+              <div style={{ marginTop: '10px' }}>
+                <button
+                  onClick={handleResendVerification}
+                  disabled={loading}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#007bff',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    fontSize: '13px',
+                    margin: '5px'
+                  }}
+                >
+                  {loading ? 'Sending...' : 'Resend Verification Email'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -333,11 +442,27 @@ function Login() {
             </div>
             {successMessage}
             <div style={{ marginTop: '10px', fontSize: '13px', color: '#0f5132' }}>
-              <strong>Don't see the email?</strong> Check your spam folder or request a new verification email from your account settings after logging in.
+              <strong>Don't see the email?</strong> Check your spam folder.
             </div>
-            <div style={{ marginTop: '15px', padding: '10px', backgroundColor: '#c3e6cb', borderRadius: '4px' }}>
-              <strong>Next Step:</strong> Verify your email, then come back here to login.
-            </div>
+            {verificationSent && (
+              <div style={{ marginTop: '15px' }}>
+                <button
+                  onClick={handleResendVerification}
+                  disabled={loading}
+                  style={{
+                    padding: '8px 16px',
+                    backgroundColor: '#28a745',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '4px',
+                    cursor: loading ? 'not-allowed' : 'pointer',
+                    fontSize: '13px'
+                  }}
+                >
+                  {loading ? 'Sending...' : 'Resend Verification Email'}
+                </button>
+              </div>
+            )}
           </div>
         )}
 
@@ -345,7 +470,7 @@ function Login() {
           {/* Role selection - only show during signup */}
           {isSignUp && (
             <div style={{ marginBottom: '20px' }}>
-              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold' }}>
+              <label style={{ display: 'block', marginBottom: '8px', fontWeight: 'bold', color: '#333' }}>
                 I am a... *
               </label>
               <select
@@ -378,7 +503,7 @@ function Login() {
             <>
               {role === 'student' && (
                 <div style={{ marginBottom: '15px' }}>
-                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                  <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                     Full Name *
                   </label>
                   <input
@@ -397,7 +522,7 @@ function Login() {
               {role === 'institution' && (
                 <>
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Institution Name *
                     </label>
                     <input
@@ -413,7 +538,7 @@ function Login() {
                   </div>
                   
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Phone Number
                     </label>
                     <input
@@ -426,7 +551,7 @@ function Login() {
                   </div>
 
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Address
                     </label>
                     <textarea
@@ -443,7 +568,7 @@ function Login() {
               {role === 'company' && (
                 <>
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Company Name *
                     </label>
                     <input
@@ -459,7 +584,7 @@ function Login() {
                   </div>
                   
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Phone Number
                     </label>
                     <input
@@ -472,7 +597,7 @@ function Login() {
                   </div>
 
                   <div style={{ marginBottom: '15px' }}>
-                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+                    <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
                       Address
                     </label>
                     <textarea
@@ -496,7 +621,7 @@ function Login() {
                   fontSize: '14px',
                   color: '#856404'
                 }}>
-                  <strong>Admin Registration:</strong> Please use an authorized admin email or contact system administrator for access.
+                  <strong>Admin Registration:</strong> Please contact system administrator for access.
                 </div>
               )}
             </>
@@ -504,7 +629,7 @@ function Login() {
 
           {/* Common fields for all roles */}
           <div style={{ marginBottom: '15px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
               Email *
             </label>
             <input
@@ -513,14 +638,14 @@ function Login() {
               onChange={(e) => handleEmailChange(e.target.value)}
               required
               style={inputStyle(fieldErrors.email)}
-              placeholder="Enter your email"
+              placeholder={getEmailPlaceholder()}
               maxLength={100}
             />
             {renderError('email')}
           </div>
 
           <div style={{ marginBottom: '20px' }}>
-            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold' }}>
+            <label style={{ display: 'block', marginBottom: '5px', fontWeight: 'bold', color: '#333' }}>
               Password *
             </label>
             <input
@@ -530,11 +655,11 @@ function Login() {
               required
               style={inputStyle(fieldErrors.password)}
               placeholder="Enter your password"
-              minLength={isSignUp ? 6 : 1}
+              minLength={isSignUp ? 8 : 1}
             />
             {isSignUp && (
               <p style={{ fontSize: '0.8rem', color: '#666', marginTop: '5px' }}>
-                Password should be at least 6 characters
+                Password must be at least 8 characters with uppercase, lowercase, and numbers
               </p>
             )}
             {renderError('password')}
@@ -553,8 +678,11 @@ function Login() {
               fontSize: '16px',
               cursor: loading ? 'not-allowed' : 'pointer',
               fontWeight: 'bold',
-              transition: 'background-color 0.3s ease'
+              transition: 'background-color 0.3s ease',
+              marginBottom: '15px'
             }}
+            onMouseOver={(e) => !loading && (e.target.style.backgroundColor = '#2980b9')}
+            onMouseOut={(e) => !loading && (e.target.style.backgroundColor = '#3498db')}
           >
             {loading ? 'Please wait...' : (isSignUp ? 'Create Account' : 'Login')}
           </button>
@@ -577,21 +705,18 @@ function Login() {
           </button>
         </div>
 
-        {isSignUp && (
-          <div style={{
-            marginTop: '20px',
-            padding: '15px',
-            backgroundColor: '#e7f3ff',
-            borderRadius: '5px',
-            border: '1px solid #b3d9ff',
-            fontSize: '13px',
-            color: '#0066cc',
-            textAlign: 'center'
-          }}>
-            <strong>Important:</strong> After registration, you will receive a verification email. 
-            You must verify your email before you can log in to your account. Your role ({role}) will determine your dashboard features.
-          </div>
-        )} 
+        <div style={{
+          marginTop: '20px',
+          padding: '15px',
+          backgroundColor: '#e7f3ff',
+          borderRadius: '5px',
+          border: '1px solid #b3d9ff',
+          fontSize: '13px',
+          color: '#0066cc',
+          textAlign: 'center'
+        }}>
+          <strong>Email Verification Required:</strong> All users must verify their email address before logging in. Check your spam folder if you don't see the verification email.
+        </div>
       </div>
     </div>
   );
